@@ -20,19 +20,23 @@
 ### Настройка poetry и запуск приложения:
 
 Cоздать и активировать виртуальное окружение в корневой директории:
-
->poetry config virtualenvs.in-project true
-> 
->source .venv/bin/activate
-
+```
+poetry config virtualenvs.in-project true
+```
+```
+source .venv/bin/activate
+```
+#####
 Установить зависимости проекта:
-
->poetry install
-
+```
+poetry install
+```
+#####
 Запустить приложение:
-
->poetry run python main.py указать ссылки через пробел
-
+```
+poetry run python main.py указать ссылки через пробел
+```
+#####
 Пример запуска приложения:
 ```
 poetry run python main.py  https://google.com https://docs.python.org
@@ -44,9 +48,11 @@ poetry run python main.py  https://google.com https://docs.python.org
 'https://docs.python.org': {'GET': 200, 'HEAD': 302, 'POST': 200}
 }
 ```
+#####
 Запуск тестов из корневой директории:
-> python -m pytest tests/
-
+```
+python -m pytest tests/
+```
 
 ### Автор
 Намистюк Анжела 
