@@ -10,7 +10,7 @@ from configs import configure_logging, parser
 from constants import CONNECTION_ERROR_VALUE
 
 
-def is_link(urls: Set[str]) -> Dict[str, None]:
+def is_link(urls: Set[str]) -> Dict[str, Dict]:
     """
     Checks if all strings in a set are links.
     :param urls: set with urls
@@ -29,6 +29,25 @@ def is_link(urls: Set[str]) -> Dict[str, None]:
     return url_method_status
 
 
+async def method_request(
+        url: str,
+        method_to_status: Dict[str, int],
+        client_session,
+        method: str
+):
+    """Function do http request."""
+    try:
+        resp = await client_session(url)
+        status_code = resp.status
+        method_to_status[method] = status_code
+
+    except ClientConnectorError:
+        logging.info(
+            f'Возникла ошибка соединения при {method} запросе по адресу {url}'
+        )
+        method_to_status[method] = CONNECTION_ERROR_VALUE
+
+
 async def http_method_availability(
         url: str,
         method_to_status: Dict[str, int]
@@ -40,6 +59,8 @@ async def http_method_availability(
     :param url: url for http request.
     """
     async with aiohttp.ClientSession() as session:
+        queue = asyncio.Queue()
+        task_list = []
         http_methods = {
             'GET': session.get,
             'HEAD': session.head,
@@ -52,16 +73,14 @@ async def http_method_availability(
         for method, client_session in http_methods.items():
             status_code = method_to_status.get(method, None)
             if status_code in [CONNECTION_ERROR_VALUE, None]:
-                try:
-                    resp = await client_session(url)
-                    status_code = resp.status
-                    method_to_status[method] = status_code
+                task = asyncio.create_task(
+                    method_request(
+                        url, method_to_status, client_session, method)
+                )
+                task_list.append(task)
 
-                except ClientConnectorError:
-                    logging.info(
-                        f'Возникла ошибка соединения при {method} запросе по адресу {url}'
-                    )
-                    method_to_status[method] = CONNECTION_ERROR_VALUE
+        await queue.join()
+        await asyncio.gather(*task_list)
 
 
 async def check_urls(
