@@ -8,5 +8,5 @@ DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S'
 CONNECTION_ERROR_VALUE = -1
 
 TEST_URL_1 = 'https://t.me/+9ZGvemKOKj4yNjdi'
-
-
+TEST_WRONG_URL ='https://google'
+TEST_INCORRECT_URL = 'https://google.coms'
