@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, Set
+from typing import Set
 
 import aiohttp
 import validators
@@ -12,56 +12,54 @@ from constants import CONNECTION_ERROR_VALUE
 
 class UrlMethodStatusCode:
     def __init__(self, urls: Set[str]) -> None:
-        self.urls = urls
-        self.url_method_status = {}
+        self.url_method_status = {
+            url: {} for url in urls if self.is_link(url)
+        }
 
-    def is_link(self, url: str) -> None:
+    @staticmethod
+    def is_link(url: str) -> bool:
         """
-        Checks if string are link.
-        Add in url_method_status: dictionary -
-        keys is urls, values is empty dictionary.
+        Checks if string is link.
         :param url: string
         """
-        if not validators.url(url):
+        is_url_valid = validators.url(url)
+        if not is_url_valid:
             print(f'Строка {url} не является ссылкой.')
             logging.info(
                 f'Строка "{url}" не является ссылкой.',
             )
-        else:
-            self.url_method_status[url] = {}
+        return is_url_valid
 
     async def method_request(
             self,
             url: str,
-            method_to_status: Dict[str, int],
-            client_session,
+            http_method,
             method: str
     ):
-        """Make http request."""
+        """
+        Make http request for each method
+        and adds in dictionary
+        key: methods, value: status code to the
+        "url_method_status"  dictionary  values.
+        """
+
         try:
-            resp = await client_session(url)
+            resp = await http_method(url)
             status_code = resp.status
-            method_to_status[method] = status_code
+            self.url_method_status[url][method] = status_code
 
         except ClientConnectorError:
             logging.info(
                 f'Возникла ошибка соединения при {method} запросе по адресу {url}'
             )
-            method_to_status[method] = CONNECTION_ERROR_VALUE
+            self.url_method_status[url][method] = CONNECTION_ERROR_VALUE
 
-    async def http_method_availability(
-            self,
-            url: str,
-            method_to_status: Dict[str, int]
-    ):
+    async def http_method_availability(self, url: str):
         """
         Checks all http methods.
-        :param  method_to_status: empty dictionary or
-        with keys: methods and values: statuses
         :param url: url for http request.
         """
         async with aiohttp.ClientSession() as session:
-            queue = asyncio.Queue()
             task_list = []
             http_methods = {
                 'GET': session.get,
@@ -72,74 +70,70 @@ class UrlMethodStatusCode:
                 'OPTIONS': session.options,
                 'PATCH': session.patch,
             }
+
+            method_to_status = self.url_method_status.get(url)
+
             for method, client_session in http_methods.items():
                 status_code = method_to_status.get(method, None)
                 if status_code in [CONNECTION_ERROR_VALUE, None]:
                     task = asyncio.create_task(
                         self.method_request(
-                            url, method_to_status, client_session, method)
+                            url, client_session, method)
                     )
                     task_list.append(task)
 
-            await queue.join()
             await asyncio.gather(*task_list)
 
-    def delete_unnecessary_methods(
-            self,
-            url: str,
-            method_to_status: Dict[str, int]):
+    async def availability_method_for_url(self, url):
         """
-        Removes methods with a 405 status code or a connection error
-        :param  method_to_status: empty dictionary
-        with keys: methods and values: statuses
+        Check available methods for url and
+        re-check available methods if response
+        came with CONNECTION_ERROR_VALUE.
+        :param url:
         """
-        unnecessary_methods = [
-            method for method, status in method_to_status.items()
-            if status in [CONNECTION_ERROR_VALUE, 405]
-        ]
-        for method in unnecessary_methods:
-            logging.info(
-                f'Ссылка {url} - {method} запрос, '
-                f'завершился ошибкой {method_to_status[method]}'
-            )
-            method_to_status.pop(method)
+        await self.http_method_availability(url)
+        method_to_status = self.url_method_status.get(url)
+        if CONNECTION_ERROR_VALUE in method_to_status.values():
+            await self.http_method_availability(url)
 
-    def check_urls(self):
+    async def check_urls(self):
         """
-        Check all urls in url_method_status dictionary
-        and delete url which doesn't have any methods available.
+        Check all urls in url_method_status dictionary.
         """
-        # List for urls that encountered a connection error:
-        error_urls_list = []
+        task_list = []
+
+        for url in self.url_method_status:
+            task = asyncio.create_task(self.availability_method_for_url(url))
+            task_list.append(task)
+
+        await asyncio.gather(*task_list)
+
+    def print_available_url_methods(self):
+        """
+        Print dictionary with available urls,
+        methods and their status code
+        without a 405 status code or a connection error
+        :param url:
+        """
+        result_dict = {}
         for url, method_to_status in self.url_method_status.items():
-            asyncio.run(self.http_method_availability(url, method_to_status))
-            if CONNECTION_ERROR_VALUE in method_to_status.values():
-                asyncio.run(self.http_method_availability(
-                    url, method_to_status))
-            # Function removes unnecessary methods from the dictionary method_to_status:
-            self.delete_unnecessary_methods(url, method_to_status)
-            # If the dictionary method_to_status is empty, then add this url to the list:
-            if not method_to_status:
-                error_urls_list.append(url)
-        # remove from dictionary url_method_status keys with urls for which
-        # it was not possible to make requests:
-        for url in error_urls_list:
-            self.url_method_status.pop(url)
+            filtered_method_to_status = {}
+            for method, status in method_to_status.items():
 
-    def main(self) -> None:
-        """
-        Checks which methods are available on this url and print a
-        dictionary, the keys are urls, the values are dictionaries
-        in which the keys are http methods,and the values are status codes.
-        """
-        for url in self.urls:
-            self.is_link(url)
-        if self.url_method_status:
-            self.check_urls()
-        print(self.url_method_status)
+                if status not in [CONNECTION_ERROR_VALUE, 405]:
+                    filtered_method_to_status[method] = status
+                else:
+                    logging.info(
+                        f'Ссылка {url} - {method} запрос, '
+                        f'завершился ошибкой {status}'
+                    )
+            if filtered_method_to_status:
+                result_dict[url] = filtered_method_to_status
+        print(result_dict)
 
 
-if __name__ == '__main__':
+def main():
+
     configure_logging()
     logging.info('Парсер запущен!')
 
@@ -147,7 +141,13 @@ if __name__ == '__main__':
     urls = set(args.urls)
 
     logging.info(f'Аргументы командной строки: {args}')
-    urls_method_status = UrlMethodStatusCode(urls)
-    urls_method_status.main()
+
+    urls_method_status: UrlMethodStatusCode = UrlMethodStatusCode(urls)
+    asyncio.run(urls_method_status.check_urls())
+    urls_method_status.print_available_url_methods()
 
     logging.info('Парсер завершил работу.')
+
+
+if __name__ == '__main__':
+    main()
